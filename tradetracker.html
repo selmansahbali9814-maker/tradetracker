@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Trade Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { font-family: Arial; background:#0f172a; color:#e5e7eb; padding:20px }
+h1,h2{text-align:center}
+.card{background:#020617;padding:15px;border-radius:10px;margin-bottom:15px}
+input,select,button{width:100%;padding:8px;margin-top:6px;border-radius:6px;border:none}
+button{background:#22c55e;font-weight:bold;cursor:pointer}
+button.secondary{background:#38bdf8}
+button.danger{background:#ef4444;color:#fff}
+.trade{border-bottom:1px solid #334155;padding:10px 0}
+.positive{color:#22c55e}
+.negative{color:#ef4444}
+.warning{color:#facc15}
+.actions button{width:auto;margin-right:5px}
+</style>
+</head>
+<body>
+
+<h1>📊 Trade Tracker</h1>
+
+<div class="card">
+<h2>Performans & Risk Özeti</h2>
+<p>📅 Günlük: <span id="dailyPnL">0</span></p>
+<p>🗓️ Aylık: <span id="monthlyPnL">0</span></p>
+<p>📦 Toplam PnL: <span id="totalPnL">0</span></p>
+<hr>
+<p>⚠️ Toplam Açık Risk: <span id="totalRisk">0</span></p>
+<p>📊 Ortalama R/R: <span id="avgRR">-</span></p>
+</div>
+
+<div class="card">
+<h2>💾 Yedekleme</h2>
+<button class="secondary" onclick="backup()">📤 Yedek Al</button>
+<br><br>
+<input type="file" id="restoreFile" accept=".json" onchange="restore(event)">
+</div>
+
+<div class="card">
+<h2>İşlem Ekle / Düzenle</h2>
+<input type="hidden" id="editIndex">
+
+<label>Tarih</label>
+<input id="date" type="date">
+
+<label>Piyasa</label>
+<select id="assetType">
+<option>BIST</option>
+<option>VIOP</option>
+<option>FOREX</option>
+<option>KRIPTO</option>
+</select>
+
+<label>Enstrüman</label>
+<input id="symbol">
+
+<label>Yön</label>
+<select id="direction">
+<option>LONG</option>
+<option>SHORT</option>
+</select>
+
+<label>Giriş</label><input id="entry" type="number">
+<label>Güncel</label><input id="current" type="number">
+<label>Miktar</label><input id="quantity" type="number">
+<label>Kaldıraç</label><input id="leverage" type="number" value="1">
+<label>Stop</label><input id="stop" type="number">
+<label>Take Profit</label><input id="tp" type="number">
+
+<button onclick="saveTrade()">Kaydet</button>
+</div>
+
+<div class="card">
+<h2>İşlemler</h2>
+<div id="tradeList"></div>
+</div>
+
+<script>
+let trades = JSON.parse(localStorage.getItem("trades")) || [];
+
+function pnl(t){
+ let d=t.direction==="LONG"?t.current-t.entry:t.entry-t.current;
+ return d*t.quantity*t.leverage;
+}
+function risk(t){
+ return t.stop?Math.abs(t.entry-t.stop)*t.quantity*t.leverage:0;
+}
+function reward(t){
+ return t.tp?Math.abs(t.tp-t.entry)*t.quantity*t.leverage:0;
+}
+
+function backup(){
+ const data = JSON.stringify(trades, null, 2);
+ const blob = new Blob([data], {type:"application/json"});
+ const a = document.createElement("a");
+ a.href = URL.createObjectURL(blob);
+ a.download = "trade-backup.json";
+ a.click();
+}
+
+function restore(event){
+ if(!confirm("Mevcut veriler silinip yedek yüklenecek. Emin misin?")) return;
+ const file = event.target.files[0];
+ const reader = new FileReader();
+ reader.onload = e => {
+   trades = JSON.parse(e.target.result);
+   localStorage.setItem("trades", JSON.stringify(trades));
+   render();
+ };
+ reader.readAsText(file);
+}
+
+function saveTrade(){
+ const t={
+  date:date.value||new Date().toISOString().slice(0,10),
+  asset:assetType.value,symbol:symbol.value,
+  direction:direction.value,
+  entry:+entry.value,current:+current.value,
+  quantity:+quantity.value,leverage:+leverage.value,
+  stop:+stop.value,tp:+tp.value
+ };
+ const i=editIndex.value;
+ i===""?trades.push(t):trades[i]=t;
+ editIndex.value="";
+ localStorage.setItem("trades",JSON.stringify(trades));
+ clearForm(); render();
+}
+
+function editTrade(i){
+ const t=trades[i];
+ date.value=t.date;assetType.value=t.asset;
+ symbol.value=t.symbol;direction.value=t.direction;
+ entry.value=t.entry;current.value=t.current;
+ quantity.value=t.quantity;leverage.value=t.leverage;
+ stop.value=t.stop;tp.value=t.tp;editIndex.value=i;
+}
+
+function deleteTrade(i){
+ if(!confirm("Silinsin mi?"))return;
+ trades.splice(i,1);
+ localStorage.setItem("trades",JSON.stringify(trades));
+ render();
+}
+
+function render(){
+ tradeList.innerHTML="";
+ let total=0,daily=0,monthly=0,riskSum=0,rewardSum=0;
+ const today=new Date().toISOString().slice(0,10);
+ const month=today.slice(0,7);
+
+ trades.forEach((t,i)=>{
+  const p=pnl(t),r=risk(t),rw=reward(t);
+  total+=p;if(t.date===today)daily+=p;
+  if(t.date.startsWith(month))monthly+=p;
+  if(r>0){riskSum+=r;rewardSum+=rw;}
+
+  const rr=r>0?(rw/r).toFixed(2):"-";
+  const rrClass=rr!=="-"&&rr<1?"negative":rr>=2?"positive":"warning";
+
+  tradeList.innerHTML+=`
+  <div class="trade">
+   <b>${t.asset} | ${t.symbol}</b><br>
+   📅 ${t.date} | ${t.direction}<br>
+   PnL: <span class="${p>=0?"positive":"negative"}">${p.toFixed(2)}</span><br>
+   Risk: ${r>0?r.toFixed(2):"-"} | Ödül: ${rw>0?rw.toFixed(2):"-"} |
+   R/R: <span class="${rrClass}">${rr}</span>
+   <div class="actions">
+    <button onclick="editTrade(${i})">✏️</button>
+    <button class="danger" onclick="deleteTrade(${i})">🗑</button>
+   </div>
+  </div>`;
+ });
+
+ dailyPnL.innerHTML=colorize(daily);
+ monthlyPnL.innerHTML=colorize(monthly);
+ totalPnL.innerHTML=colorize(total);
+ totalRisk.innerHTML=riskSum.toFixed(2);
+ avgRR.innerHTML=riskSum>0?(rewardSum/riskSum).toFixed(2):"-";
+}
+
+function colorize(v){
+ return `<span class="${v>=0?"positive":"negative"}">${v.toFixed(2)}</span>`;
+}
+function clearForm(){
+ document.querySelectorAll("input").forEach(i=>i.value="");
+ leverage.value=1;
+}
+render();
+</script>
+</body>
+</html>
